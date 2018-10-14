@@ -39,6 +39,12 @@ class GridSearch:
                 hyper_params=hyper_params,
                 machines=machines)
 
+        self.adjust_num_threads();
+
+    def adjust_num_threads(self):
+        # make sure we don't have more threads than experiments
+        self.num_jobs = min(self.num_jobs, len(self.cirrus_objs))
+
 
     # User must either specify param_dict_lst, or hyper_vars, hyper_params, and param_base
     def set_task_parameters(self, task, param_base=None, hyper_vars=[], hyper_params=[], machines=[]):
@@ -56,6 +62,7 @@ class GridSearch:
             modified_config['ps_ip_private'] = machines[index][1]
             index = (index + 1) % num_machines
             base_port += 2
+
             c = task(**modified_config)
             self.cirrus_objs.append(c)
             self.infos.append({'color': get_random_color()})
@@ -193,6 +200,8 @@ class GridSearch:
 
     def set_threads(self, n):
         self.num_jobs = n
+
+        self.adjust_num_threads();
 
 
     # Start threads to maintain all experiments

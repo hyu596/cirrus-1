@@ -18,36 +18,44 @@
 
 namespace cirrus {
 
-PSSparseServerTask::PSSparseServerTask(
-    uint64_t model_size,
-    uint64_t batch_size, uint64_t samples_per_batch,
-    uint64_t features_per_sample, uint64_t nworkers,
-    uint64_t worker_id, const std::string& ps_ip,
-    uint64_t ps_port) :
-  MLTask(model_size,
-      batch_size, samples_per_batch, features_per_sample,
-      nworkers, worker_id, ps_ip, ps_port) {
-    std::cout << "PSSparseServerTask is built" << std::endl;
+PSSparseServerTask::PSSparseServerTask(uint64_t model_size,
+                                       uint64_t batch_size,
+                                       uint64_t samples_per_batch,
+                                       uint64_t features_per_sample,
+                                       uint64_t nworkers,
+                                       uint64_t worker_id,
+                                       const std::string& ps_ip,
+                                       uint64_t ps_port)
+    : MLTask(model_size,
+             batch_size,
+             samples_per_batch,
+             features_per_sample,
+             nworkers,
+             worker_id,
+             ps_ip,
+             ps_port),
+      kill_signal(false),
+      main_thread(0),
+      threads_barrier(new pthread_barrier_t, destroy_pthread_barrier) {
+  std::cout << "PSSparseServerTask is built" << std::endl;
 
-    std::atomic_init(&gradientUpdatesCount, 0UL);
-    std::atomic_init(&thread_count, 0);
+  std::atomic_init(&gradientUpdatesCount, 0UL);
+  std::atomic_init(&thread_count, 0);
 
-    operation_to_name[0] = "SEND_LR_GRADIENT";
-    operation_to_name[1] = "SEND_MF_GRADIENT";
-    operation_to_name[2] = "GET_LR_FULL_MODEL";
-    operation_to_name[3] = "GET_MF_FULL_MODEL";
-    operation_to_name[4] = "GET_LR_SPARSE_MODEL";
-    operation_to_name[5] = "GET_MF_SPARSE_MODEL";
-    operation_to_name[6] = "SET_TASK_STATUS";
-    operation_to_name[7] = "GET_TASK_STATUS";
-    operation_to_name[8] = "REGISTER_TASK";
-    operation_to_name[9] = "GET_NUM_CONNS";
+  operation_to_name[0] = "SEND_LR_GRADIENT";
+  operation_to_name[1] = "SEND_MF_GRADIENT";
+  operation_to_name[2] = "GET_LR_FULL_MODEL";
+  operation_to_name[3] = "GET_MF_FULL_MODEL";
+  operation_to_name[4] = "GET_LR_SPARSE_MODEL";
+  operation_to_name[5] = "GET_MF_SPARSE_MODEL";
+  operation_to_name[6] = "SET_TASK_STATUS";
+  operation_to_name[7] = "GET_TASK_STATUS";
+  operation_to_name[8] = "REGISTER_TASK";
+  operation_to_name[9] = "GET_NUM_CONNS";
 
-    for (int i = 0; i < NUM_PS_WORK_THREADS; i++) {
-      thread_msg_buffer[i] =
-          new char[THREAD_MSG_BUFFER_SIZE]; // per-thread buffer
-    }
-    kill_signal = false;
+  for (int i = 0; i < NUM_PS_WORK_THREADS; i++) {
+    thread_msg_buffer[i].reset(new char[THREAD_MSG_BUFFER_SIZE]);
+  }
 }
 
 std::shared_ptr<char> PSSparseServerTask::serialize_lr_model(
@@ -166,16 +174,15 @@ bool PSSparseServerTask::process_get_mf_sparse_model(
 #endif
 
   SparseMFModel sparse_mf_model((uint64_t) 0, 0, 0);
-  sparse_mf_model.serializeFromDense(
-      *mf_model, base_user_id, minibatch_size,
-      k_items, thread_buffer.data(), thread_msg_buffer[thread_number]);
-
+  sparse_mf_model.serializeFromDense(*mf_model, base_user_id, minibatch_size,
+                                     k_items, thread_buffer.data(),
+                                     thread_msg_buffer[thread_number].get());
   //uint32_t to_send_size = data_to_send.size();
   if (send_all(req.sock, &to_send_size, sizeof(uint32_t)) == -1) {
     return false;
   }
-  if (send_all(req.sock, thread_msg_buffer[thread_number], to_send_size) ==
-      -1) {
+  if (send_all(req.sock, thread_msg_buffer[thread_number].get(),
+               to_send_size) == -1) {
     return false;
   }
   return true;
@@ -320,7 +327,10 @@ void PSSparseServerTask::gradient_f() {
       continue;
     }
 
-    req.req_id = operation;
+#ifdef DEBUG
+    std::cout << "Operation: " << operation << " - "
+              << operation_to_name[operation] << std::endl;
+#endif
 
     if (operation == REGISTER_TASK) {
       // read the task id
@@ -350,19 +360,15 @@ void PSSparseServerTask::gradient_f() {
       req.incoming_size = incoming_size;
     }
 
-#ifdef DEBUG
-    std::cout << "Processing request: " << req.req_id << std::endl;
-#endif
-
-    if (req.req_id == SEND_LR_GRADIENT) {
+    if (operation == SEND_LR_GRADIENT) {
       if (!process_send_lr_gradient(req, thread_buffer)) {
         break;
       }
-    } else if (req.req_id == SEND_MF_GRADIENT) {
+    } else if (operation == SEND_MF_GRADIENT) {
       if (!process_send_mf_gradient(req, thread_buffer)) {
         break;
       }
-    } else if (req.req_id == GET_LR_SPARSE_MODEL) {
+    } else if (operation == GET_LR_SPARSE_MODEL) {
 #ifdef DEBUG
       std::cout << "process_get_lr_sparse_model" << std::endl;
       auto before = get_time_us();
@@ -374,17 +380,17 @@ void PSSparseServerTask::gradient_f() {
       auto elapsed = get_time_us() - before;
       std::cout << "GET_LR_SPARSE_MODEL Elapsed(us): " << elapsed << std::endl;
 #endif
-    } else if (req.req_id == GET_MF_SPARSE_MODEL) {
+    } else if (operation == GET_MF_SPARSE_MODEL) {
       if (!process_get_mf_sparse_model(req, thread_buffer, thread_number)) {
         break;
       }
-    } else if (req.req_id == GET_LR_FULL_MODEL) {
+    } else if (operation == GET_LR_FULL_MODEL) {
       if (!process_get_lr_full_model(req, thread_buffer))
         break;
-    } else if (req.req_id == GET_MF_FULL_MODEL) {
+    } else if (operation == GET_MF_FULL_MODEL) {
       if (!process_get_mf_full_model(req, thread_buffer))
         break;
-    } else if (req.req_id == GET_TASK_STATUS) {
+    } else if (operation == GET_TASK_STATUS) {
       uint32_t task_id;
       if (read_all(sock, &task_id, sizeof (uint32_t)) == 0) {
         break;
@@ -450,7 +456,6 @@ void PSSparseServerTask::gradient_f() {
 
 /**
  * FORMAT
- * operation (uint32_t)
  * incoming size (uint32_t)
  * buffer with previous size
  */
@@ -460,19 +465,13 @@ bool PSSparseServerTask::process(struct pollfd& poll_fd, int thread_id) {
   std::cout << "Processing socket: " << sock << std::endl;
 #endif
 
-  uint32_t operation = 0;
-#ifdef DEBUG 
-  std::cout << "Operation: " << operation << " - "
-      << operation_to_name[operation] << std::endl;
-#endif
-
   uint32_t incoming_size = 0;
 #ifdef DEBUG 
   std::cout << "incoming size: " << incoming_size << std::endl;
 #endif
   to_process_lock.lock();
   poll_fd.events = 0; // explain this
-  to_process.push(Request(operation, sock, thread_id, incoming_size, poll_fd));
+  to_process.push(Request(sock, thread_id, incoming_size, poll_fd));
   to_process_lock.unlock();
   sem_post(&sem_new_req);
   return true;
@@ -482,18 +481,26 @@ void PSSparseServerTask::start_server() {
   lr_model.reset(new SparseLRModel(model_size));
   lr_model->randomize();
 
+  mf_model.reset(new MFModel(task_config.get_users(), task_config.get_items(),
+                             NUM_FACTORS));
+  mf_model->randomize();
+
   sem_init(&sem_new_req, 0, 0);
 
-  for (int i = 0; i < NUM_POLL_THREADS; i++) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    server_threads.push_back(std::make_unique<std::thread>(
-          std::bind(&PSSparseServerTask::main_poll_thread_fn, this, i)));
-  }
-
   for (uint32_t i = 0; i < NUM_PS_WORK_THREADS; ++i) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     gradient_thread.push_back(std::make_unique<std::thread>(
           std::bind(&PSSparseServerTask::gradient_f, this)));
+  }
+
+  // create barrier for all poll threads
+  if (pthread_barrier_init(threads_barrier.get(), nullptr, NUM_POLL_THREADS) !=
+      0) {
+    throw std::runtime_error("Error in threads barrier");
+  }
+
+  for (int i = 0; i < NUM_POLL_THREADS; i++) {
+    server_threads.push_back(std::make_unique<std::thread>(
+        std::bind(&PSSparseServerTask::main_poll_thread_fn, this, i)));
   }
 
   // start checkpoing thread
@@ -559,6 +566,9 @@ void PSSparseServerTask::main_poll_thread_fn(int poll_id) {
     curr_indexes[poll_id] = 1;
 
   }
+
+  pthread_barrier_wait(threads_barrier.get());
+
   loop(poll_id);
 }
 
@@ -677,7 +687,7 @@ void PSSparseServerTask::run(const Configuration& config) {
 
   for (int i = 0; i < NUM_POLL_THREADS; i++) {
     assert(pipe(pipefds[i]) != -1);
-    curr_indexes[i] == 0;
+    curr_indexes[i] = 0;
     fdses[i].resize(max_fds);
   }
 
@@ -764,6 +774,15 @@ void PSSparseServerTask::checkpoint_model_file(
   std::ofstream fout(filename.c_str(), std::ofstream::binary);
   fout.write(data.get(), model_size);
   fout.close();
+}
+
+void PSSparseServerTask::destroy_pthread_barrier(pthread_barrier_t* barrier) {
+  // this fails if barrier has been allocated but not initialized
+  // we don't handle this situation
+  if (pthread_barrier_destroy(barrier) != 0) {
+    throw std::runtime_error("Error destroying barrier");
+  }
+  delete barrier;
 }
 
 } // namespace cirrus
