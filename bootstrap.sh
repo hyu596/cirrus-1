@@ -13,7 +13,7 @@ if [ ! -d "lz4-dev" ]; then
 fi
 cd lz4-dev
 make
-sudo make install
+make install
 
 cd ..
 if [ ! -d "eigen_source" ]; then

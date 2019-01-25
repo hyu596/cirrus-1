@@ -1,7 +1,6 @@
 #ifndef _LDAMODEL_H_
 #define _LDAMODEL_H_
 
-#include <LDADataset.h>
 #include <Model.h>
 #include <ModelGradient.h>
 #include <map>

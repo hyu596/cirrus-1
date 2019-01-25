@@ -34,12 +34,12 @@ CIRRUS_SRC_FILES=$(CIRRUS_SRC_DIR)/Configuration.cpp \
 		    $(CIRRUS_SRC_DIR)/S3IteratorLibsvm.cpp \
 		    $(CIRRUS_SRC_DIR)/S3Client.cpp \
 		    $(CIRRUS_SRC_DIR)/SparseDataset.cpp \
-				$(CIRRUS_SRC_DIR)/LDAStatistics.cpp \
-				$(CIRRUS_SRC_DIR)/LoadingLDATaskS3.cpp \
-				$(CIRRUS_SRC_DIR)/LDATaskS3.cpp \
-				$(CIRRUS_SRC_DIR)/LDADataset.cpp \
-				$(CIRRUS_SRC_DIR)/LDAModel.cpp \
-				$(CIRRUS_SRC_DIR)/gamma.cpp
+		    $(CIRRUS_SRC_DIR)/LDAStatistics.cpp \
+		    $(CIRRUS_SRC_DIR)/LoadingLDATaskS3.cpp \
+		    $(CIRRUS_SRC_DIR)/LDATaskS3.cpp \
+		    $(CIRRUS_SRC_DIR)/LDADataset.cpp \
+		    $(CIRRUS_SRC_DIR)/LDAModel.cpp \
+		    $(CIRRUS_SRC_DIR)/gamma.cpp
 
 LINCLUDES = -L$(THIRD_PARTY_DIR)/kerberos/src/lib \
 	    -L$(THIRD_PARTY_DIR)/keyutils/ \
@@ -49,7 +49,7 @@ LINCLUDES = -L$(THIRD_PARTY_DIR)/kerberos/src/lib \
 	    -L$(THIRD_PARTY_DIR)/aws-sdk-cpp/build/aws-cpp-sdk-s3 \
 	    -L/home/ec2-user/kerberos/krb5-1.15.2/src/lib \
 	    -L/home/ec2-user/keyutils/keyutils-1.5.10 \
-			-L$(THIRD_PARTY_DIR)/lz4-dev/lib
+	    -L$(THIRD_PARTY_DIR)/lz4-dev/lib
 
 LIBS= -laws-cpp-sdk-s3 -laws-cpp-sdk-core \
       -lcurl -lssl -lcrypto -lz -ldl -lkrb5 -lk5crypto \

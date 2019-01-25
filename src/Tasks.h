@@ -5,6 +5,7 @@
 
 #include "LDAModel.h"
 #include "LDAStatistics.h"
+#include "LDADataset.h"
 #include "LRModel.h"
 #include "MFModel.h"
 #include "ModelGradient.h"

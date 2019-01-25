@@ -8,7 +8,7 @@
 namespace cirrus {
 LDADataset::LDADataset() {}
 
-LDADataset::LDADataset(std::vector<std::vector<std::pair<int, int> > > docs,
+LDADataset::LDADataset(std::vector<std::vector<std::pair<int, int>>> docs,
                        std::vector<std::string> vocabs) {
   docs_ = docs;
   vocabs_ = vocabs;
@@ -16,14 +16,15 @@ LDADataset::LDADataset(std::vector<std::vector<std::pair<int, int> > > docs,
 }
 
 LDADataset::LDADataset(const char* msg_begin) {
-  std::vector<std::pair<int, int> > doc;
-  doc.clear();
+  std::vector<std::pair<int, int>> doc;
 
   int D = load_value<int>(msg_begin);
   docs_.clear();
   docs_.reserve(D);
 
   std::cout << "# of documents: " << D << std::endl;
+
+  // Read word counts for each doc
   for (int i = 0; i < D; ++i) {
     int N = load_value<int>(msg_begin);
     doc.reserve(N);
@@ -66,19 +67,21 @@ void LDADataset::check() const {
 }
 
 void LDADataset::get_some_docs(
-    std::vector<std::vector<std::pair<int, int> > >& docs) {
+    std::vector<std::vector<std::pair<int, int>>>& docs) {
   docs.clear();
-  if (docs_.size() > sample_size)
+  if (docs_.size() > sample_size) {
     docs.resize(sample_size);
-  else
+  } else {
     docs.resize(docs_.size());
+  }
+
+  const auto end_it = docs_.size() > sample_size ?
+    docs_.begin() + sample_size : docs_.end();
   std::copy(
       docs_.begin(),
-      docs_.size() > sample_size ? docs_.begin() + sample_size : docs_.end(),
+      end_it,
       docs.begin());
-  docs_.erase(docs_.begin(), docs_.size() > sample_size
-                                 ? docs_.begin() + sample_size
-                                 : docs_.end());
+  docs_.erase(docs_.begin(), end_it);
 }
 
 char* LDADataset::serialize() {
