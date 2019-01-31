@@ -43,38 +43,15 @@ void run_tasks(int rank,
         batch_size, samples_per_batch, features_per_sample,
         nworkers, rank, ps_ip, ps_port);
     st.run(config);
-  } else if (rank >= WORKERS_BASE && rank < WORKERS_BASE + nworkers) {
-    /**
-     * Worker tasks run here
-     * Number of tasks is determined by the value of nworkers
-     */
-    if (config.get_model_type() == cirrus::Configuration::LOGISTICREGRESSION) {
-      cirrus::LogisticSparseTaskS3 lt(features_per_sample,
-          batch_size, samples_per_batch, features_per_sample,
-          nworkers, rank, ps_ip, ps_port);
-      lt.run(config, rank - WORKERS_BASE);
-    } else if (config.get_model_type()
-            == cirrus::Configuration::COLLABORATIVE_FILTERING) {
-      cirrus::MFNetflixTask lt(0,
-          batch_size, samples_per_batch, features_per_sample,
-          nworkers, rank, ps_ip, ps_port);
-      lt.run(config, rank - WORKERS_BASE);
-    } else if (config.get_model_type() == cirrus::Configuration::LDA) {
-      cirrus::LDATaskS3 lt(1, batch_size, samples_per_batch,
-                           features_per_sample, nworkers, rank, ps_ip, ps_port);
-      lt.run(config, rank - WORKERS_BASE);
-    } else {
-      exit(-1);
-    }
-  /**
-    * SPARSE tasks
-    */
   } else if (rank == ERROR_SPARSE_TASK_RANK) {
     cirrus::ErrorSparseTask et((1 << config.get_model_bits()),
         batch_size, samples_per_batch, features_per_sample,
         nworkers, rank, ps_ip, ps_port);
     et.run(config, testing, test_iters, test_threshold);
     cirrus::sleep_forever();
+    /**
+      * SPARSE tasks
+      */
   } else if (rank == LOADING_SPARSE_TASK_RANK) {
     if (config.get_model_type() == cirrus::Configuration::LOGISTICREGRESSION) {
       cirrus::LoadingSparseTaskS3 lt((1 << config.get_model_bits()),
@@ -96,7 +73,32 @@ void run_tasks(int rank,
                                 nworkers, rank, ps_ip, ps_port);
     st.run(config);
   } else {
-    throw std::runtime_error("Wrong task rank: " + std::to_string(rank));
+    int worker_base = cirrus::Configuration::WORKERS_BASE[config.get_model_type()];
+
+    if (rank >= worker_base && rank < worker_base + nworkers) {
+      /**
+       * Worker tasks run here
+       * Number of tasks is determined by the value of nworkers
+       */
+      if (config.get_model_type() == cirrus::Configuration::LOGISTICREGRESSION) {
+        cirrus::LogisticSparseTaskS3 lt(features_per_sample,
+            batch_size, samples_per_batch, features_per_sample,
+            nworkers, rank, ps_ip, ps_port);
+        lt.run(config, rank - worker_base);
+      } else if (config.get_model_type()
+              == cirrus::Configuration::COLLABORATIVE_FILTERING) {
+        cirrus::MFNetflixTask lt(0,
+            batch_size, samples_per_batch, features_per_sample,
+            nworkers, rank, ps_ip, ps_port);
+        lt.run(config, rank - worker_base);
+      } else if (config.get_model_type() == cirrus::Configuration::LDA) {
+        cirrus::LDATaskS3 lt(1, batch_size, samples_per_batch,
+                             features_per_sample, nworkers, rank, ps_ip, ps_port);
+        lt.run(config, rank - worker_base);
+      }
+   } else {
+      throw std::runtime_error("Wrong task rank: " + std::to_string(rank));
+   }
   }
 }
 

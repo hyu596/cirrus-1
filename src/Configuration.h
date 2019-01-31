@@ -234,6 +234,8 @@ class Configuration {
     std::string checkpoint_s3_keyname = "";  // s3 key where to store model
 
     double momentum_beta = 0.0;
+
+    static constexpr int WORKERS_BASE[5] = {-1, 4, -1, -1, 5};
 };
 
 }  // namespace cirrus
