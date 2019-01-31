@@ -161,10 +161,7 @@ class ErrorSparseTask : public MLTask {
                    const std::string& ps_ip,
                    uint64_t ps_port);
 
-   void run(const Configuration& config,
-            bool testing,
-            int iters,
-            double test_threshold);
+   void run(const Configuration& config);
    void error_response();
 
   private:
@@ -596,7 +593,7 @@ class LoadingLDATaskS3 : public MLTask {
 
  private:
   std::array<int, VOCAB_DIM_UPPER> lookup_map;
-  int idx = 0;  //< Dummy indicator 
+  int idx = 0;  //< Dummy indicator
 };
 }
 
