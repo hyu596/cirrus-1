@@ -10,10 +10,32 @@
 #include "Configuration.h"
 #include "Constants.h"
 
+#include <atomic>
+
 #define DEBUG
 #define ERROR_INTERVAL_USEC (100000)  // time between error checks
 
 namespace cirrus {
+
+ErrorSparseTask::ErrorSparseTask(uint64_t model_size,
+                                 uint64_t batch_size,
+                                 uint64_t samples_per_batch,
+                                 uint64_t features_per_sample,
+                                 uint64_t nworkers,
+                                 uint64_t worker_id,
+                                 const std::string& ps_ip,
+                                 uint64_t ps_port)
+    : MLTask(model_size,
+             batch_size,
+             samples_per_batch,
+             features_per_sample,
+             nworkers,
+             worker_id,
+             ps_ip,
+             ps_port) {
+  ps_port = ps_port;
+  std::atomic_init(&curr_error, 0.0);
+}
 
 std::unique_ptr<CirrusModel> get_model(const Configuration& config,
         const std::string& ps_ip, uint64_t ps_port) {
@@ -85,7 +107,10 @@ void ErrorSparseTask::error_response() {
   }
 }
 
-void ErrorSparseTask::run(const Configuration& config) {
+void ErrorSparseTask::run(const Configuration& config,
+                          bool testing,
+                          int iters,
+                          double test_threshold) {
   std::cout << "Creating error response thread" << std::endl;
   std::thread error_thread(std::bind(&ErrorSparseTask::error_response, this));
 
@@ -104,15 +129,15 @@ void ErrorSparseTask::run(const Configuration& config) {
     exit(-1);
   }
 
-  S3SparseIterator s3_iter(left, right, config,
-      config.get_s3_size(), config.get_minibatch_size(),
+  S3SparseIterator s3_iter(
+      left, right, config, config.get_s3_size(), config.get_minibatch_size(),
       // use_label true for LR
-      config.get_model_type() == Configuration::LOGISTICREGRESSION,
-      0, false);
+      config.get_model_type() == Configuration::LOGISTICREGRESSION, 0, false,
+      config.get_model_type() == Configuration::LOGISTICREGRESSION);
 
   // get data first
   // what we are going to use as a test set
-  std::vector<SparseDataset> minibatches_vec;
+  std::vector<std::shared_ptr<SparseDataset>> minibatches_vec;
   std::cout << "[ERROR_TASK] getting minibatches from "
     << config.get_train_range().first << " to "
     << config.get_train_range().second
@@ -121,10 +146,7 @@ void ErrorSparseTask::run(const Configuration& config) {
   uint32_t minibatches_per_s3_obj =
     config.get_s3_size() / config.get_minibatch_size();
   for (uint64_t i = 0; i < (right - left) * minibatches_per_s3_obj; ++i) {
-    const void* minibatch_data = s3_iter.get_next_fast();
-    SparseDataset ds(reinterpret_cast<const char*>(minibatch_data),
-        config.get_minibatch_size(),
-        config.get_model_type() == Configuration::LOGISTICREGRESSION);
+    std::shared_ptr<SparseDataset> ds = s3_iter.getNext();
     minibatches_vec.push_back(ds);
   }
 
@@ -140,9 +162,17 @@ void ErrorSparseTask::run(const Configuration& config) {
   std::cout << "[ERROR_TASK] Computing accuracies"
     << "\n";
 
+  int iterations = 0;
+  FEATURE_TYPE total_accuracy = 0;
   while (1) {
     usleep(ERROR_INTERVAL_USEC);
-
+    if (iterations >= iters && testing) {
+      exit(EXIT_FAILURE);
+    }
+    if ((total_accuracy / minibatches_vec.size()) >= test_threshold &&
+        testing) {
+      exit(EXIT_SUCCESS);
+    }
     try {
       // first we get the model
 #ifdef DEBUG
@@ -159,21 +189,21 @@ void ErrorSparseTask::run(const Configuration& config) {
         << "[ERROR_TASK] computing loss."
         << std::endl;
       FEATURE_TYPE total_loss = 0;
-      FEATURE_TYPE total_accuracy = 0;
+      total_accuracy = 0;
       uint64_t total_num_samples = 0;
       uint64_t total_num_features = 0;
       uint64_t start_index = 0;
 
       for (auto& ds : minibatches_vec) {
         std::pair<FEATURE_TYPE, FEATURE_TYPE> ret =
-          model->calc_loss(ds, start_index);
+            model->calc_loss(*ds, start_index);
         total_loss += ret.first;
         total_accuracy += ret.second;
-        total_num_samples += ds.num_samples();
-        total_num_features += ds.num_features();
+        total_num_samples += ds->num_samples();
+        total_num_features += ds->num_features();
         start_index += config.get_minibatch_size();
         if (config.get_model_type() == Configuration::LOGISTICREGRESSION) {
-          curr_error = (total_loss / total_num_features);
+          curr_error = (total_loss / total_num_samples);
         } else if (config.get_model_type() ==
                    Configuration::COLLABORATIVE_FILTERING) {
           curr_error = std::sqrt(total_loss / total_num_features);
@@ -197,6 +227,7 @@ void ErrorSparseTask::run(const Configuration& config) {
     } catch(...) {
       std::cout << "run_compute_error_task unknown id" << std::endl;
     }
+    iterations++;
   }
 }
 
